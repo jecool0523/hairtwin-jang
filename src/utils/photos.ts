@@ -12,8 +12,17 @@ export async function normalizePhoto(src: string): Promise<string> {
   const w = image.naturalWidth * scale, h = image.naturalHeight * scale;
   context.drawImage(image, (1024 - w) / 2, (1024 - h) / 2, w, h);
   try {
-    const result = canvas.toDataURL('image/png');
-    if (result.length > 8_000_000) throw new Error('사진 용량이 너무 큽니다. 더 작은 사진을 선택해주세요.');
+    let result = canvas.toDataURL('image/png');
+    while (result.length > 3_800_000 && canvas.width > 256) {
+      const reduced = document.createElement('canvas');
+      reduced.width = reduced.height = Math.floor(canvas.width * 0.8);
+      reduced.getContext('2d')!.drawImage(canvas, 0, 0, reduced.width, reduced.height);
+      canvas.width = reduced.width;
+      canvas.height = reduced.height;
+      canvas.getContext('2d')!.drawImage(reduced, 0, 0);
+      result = canvas.toDataURL('image/png');
+    }
+    if (result.length > 3_800_000) throw new Error('사진 용량이 너무 큽니다. 더 작은 사진을 선택해주세요.');
     return result;
   } catch (e) {
     if (e instanceof DOMException) throw new Error('참고 사진을 읽을 수 없습니다. 사진 파일로 다시 등록해주세요.');

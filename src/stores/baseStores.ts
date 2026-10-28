@@ -32,7 +32,7 @@ export const useAuth = create<AuthState>()(
           setToken(token);
           set({ loggedIn: true, designer: designer.name, serverMode: true });
         } catch (e) {
-          if (isOnlineError(e)) {
+          if (isOnlineError(e) && import.meta.env.VITE_AUTH_PROVIDER !== 'real') {
             // 백엔드 없이도 체험 가능 (기존 로컬 동작 유지)
             clearToken();
             set({ loggedIn: true, designer: display, serverMode: false });
