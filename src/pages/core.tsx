@@ -106,7 +106,7 @@ export function LoginPage() {
         <div className="bg-ink text-white rounded-3xl p-7 sm:p-9 grid sm:grid-cols-[1fr_320px] gap-6 items-center">
           <div>
             <h2 className="text-[24px] font-extrabold">디자이너 로그인</h2>
-            <p className="mt-2 text-[13px] text-white/70">이미지 생성은 현재 목업 모드로 제공됩니다.</p>
+            <p className="mt-2 text-[13px] text-white/70">{import.meta.env.VITE_AI_PROVIDER === 'real' ? 'OpenAI로 헤어스타일 이미지를 생성합니다.' : '이미지 생성은 현재 목업 모드로 제공됩니다.'}</p>
             <p className="text-white/60 text-[15px] mt-1">{realAuth ? '이름과 비밀번호로 상담 기록을 안전하게 관리하세요.' : '태블릿을 켜고 바로 상담을 시작하세요. 비밀번호는 필요 없어요.'}</p>
             <div className="mt-4 flex gap-2 flex-wrap">
               <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') start(); }}

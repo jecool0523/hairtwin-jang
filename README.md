@@ -8,7 +8,7 @@
 - Node.js 22, Vite 프론트와 `api/index.mjs`의 Express API를 함께 배포합니다.
 - 운영에서는 비밀번호로 회원가입·로그인합니다. SQLite와 이름만 사용하는 로그인은 로컬 개발용으로 유지합니다.
 - 사진은 계정별로 중복을 제거해 DB에 저장하고, 화면에는 만료되는 서명 URL을 전달합니다. 여러 사진을 개별 업로드하므로 Vercel의 4.5MB 요청·응답 제한 안에서 상담을 처리합니다.
-- `AI_PROVIDER=mock`입니다. 실제 생성 활성화에는 서버 환경변수 `OPENAI_API_KEY`를 등록하고 `AI_PROVIDER=real`로 바꾼 뒤 재배포해야 합니다.
+- 운영 환경에 `OPENAI_API_KEY`를 비밀 환경변수로 등록하고 `AI_PROVIDER=real`, `VITE_AI_PROVIDER=real`, `OPENAI_IMAGE_MODEL=gpt-image-2.5-sunburst`로 설정했습니다. 키는 GitHub 및 브라우저 번들에 포함되지 않습니다.
 
 Vercel의 필수 환경변수:
 
@@ -18,7 +18,9 @@ Vercel의 필수 환경변수:
 | `JWT_SECRET` | 충분히 긴 무작위 서버 전용 비밀키 |
 | `AUTH_PROVIDER` / `VITE_AUTH_PROVIDER` | `real` |
 | `SEED_DEMO` | `false` |
-| `AI_PROVIDER` | `mock`; 실제 AI 키를 연결한 뒤 `real` |
+| `AI_PROVIDER` / `VITE_AI_PROVIDER` | 운영: `real`; 로컬 체험: `mock` |
+| `OPENAI_API_KEY` | 서버 전용 비밀 환경변수 |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst` |
 | `VITE_MOCK_AI` | `false` |
 | `CORS_ORIGIN` | `https://hairtwin-jang.vercel.app` |
 
