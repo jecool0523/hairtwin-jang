@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { normalizePhoto, photoFromFile } from '../utils/photos';
+import { CameraCapture } from '../components/CameraCapture';
 import { useNavigate } from 'react-router-dom';
 import { AppShell, PrimaryButton, SecondaryButton, PageHeader, Chip, Segmented, SliderControl, NoConsult, Guard, MockBadge } from '../components/ui';
 import { useConsult, transitionTo } from '../stores/consultationStore';
@@ -93,25 +94,42 @@ export function PhotoPage() {
   const nav = useNavigate();
   const { photos, set } = useConsult();
   const input = useRef<HTMLInputElement>(null);
+  const nativeInput = useRef<HTMLInputElement>(null);
+  const fileTarget = useRef<'front' | 'side' | 'back'>('front');
+  const active = useRef(true);
+  const request = useRef(0);
   const [tab, setTab] = useState<'front' | 'side' | 'back'>('front');
+  const [cameraFor, setCameraFor] = useState<'front' | 'side' | 'back' | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const labels = { front: '정면', side: '측면', back: '후면' };
   const done = photos.front && photos.side && photos.back;
-  const save = async (load: () => Promise<string>) => {
+  const chooseFile = (target: 'front' | 'side' | 'back', native = false) => {
+    fileTarget.current = target;
+    (native ? nativeInput : input).current?.click();
+  };
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; request.current += 1; };
+  }, []);
+  const applyPhoto = (image: string, target: 'front' | 'side' | 'back') => {
+    set({ photos: { ...useConsult.getState().photos, [target]: image } });
+    if (target === 'front') setTab('side'); else if (target === 'side') setTab('back');
+  };
+  const save = async (load: () => Promise<string>, target = tab) => {
+    const id = ++request.current;
     setBusy(true); setError('');
     try {
       const image = await load();
-      set({ photos: { ...useConsult.getState().photos, [tab]: image } });
-      if (tab === 'front') setTab('side'); else if (tab === 'side') setTab('back');
-    } catch (e) { setError(e instanceof Error ? e.message : '사진을 불러오지 못했어요.'); }
-    finally { setBusy(false); }
+      if (active.current && request.current === id) applyPhoto(image, target);
+    } catch (e) { if (active.current && request.current === id) setError(e instanceof Error ? e.message : '사진을 불러오지 못했어요.'); }
+    finally { if (active.current && request.current === id) setBusy(false); }
   };
   return (
     <AppShell>
       <PageHeader title="현재 머리를 세 방향에서 보여주세요." sub="얼굴과 머리 전체가 보이는 사진을 촬영하거나 선택해주세요." step={3} total={TOTAL} />
       <div className="flex gap-2 mb-4">
         {(['front','side','back'] as const).map(k => (
-          <button key={k} disabled={busy} onClick={() => setTab(k)}
+          <button key={k} disabled={busy || cameraFor !== null} onClick={() => setTab(k)}
             className={`flex-1 min-h-[48px] rounded-xl border font-bold ${tab === k ? 'bg-ink text-white' : 'border-line'}`}>
             {photos[k] ? '● ' : '○ '}{labels[k]}
           </button>
@@ -122,17 +140,29 @@ export function PhotoPage() {
         {photos[tab] ? <img src={photos[tab]!} alt={labels[tab]} className="w-full aspect-square object-contain" /> :
           <div className="aspect-square flex items-center justify-center text-secondary">얼굴과 머리 끝까지 프레임에 담아주세요.</div>}
       </div>
-      <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" capture="environment" className="hidden"
+      <input ref={input} type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" className="hidden"
         aria-label={labels[tab] + ' 고객 사진'} onChange={e => {
           const file = e.target.files?.[0]; e.target.value = '';
-          if (file) void save(() => photoFromFile(file));
+          if (file) void save(() => photoFromFile(file), fileTarget.current);
         }} />
-      <PrimaryButton disabled={busy} onClick={() => input.current?.click()}>{busy ? '사진 준비 중…' : photos[tab] ? '사진 다시 선택' : '촬영 또는 사진 선택'}</PrimaryButton>
+      <input ref={nativeInput} type="file" accept="image/png,image/jpeg,image/webp" capture="environment" className="hidden"
+        aria-label={labels[tab] + ' 기기 카메라 사진'} onChange={e => {
+          const file = e.target.files?.[0]; e.target.value = '';
+          if (file) void save(() => photoFromFile(file), fileTarget.current);
+        }} />
+      <div className="flex flex-wrap gap-2">
+        <PrimaryButton disabled={busy} onClick={() => { setError(''); setCameraFor(tab); }}>카메라로 촬영</PrimaryButton>
+        <SecondaryButton disabled={busy} onClick={() => chooseFile(tab)}>{busy ? '사진 준비 중…' : photos[tab] ? '사진 파일 다시 선택' : '사진 파일 선택'}</SecondaryButton>
+      </div>
+      {cameraFor && <CameraCapture label={labels[cameraFor]} onClose={() => setCameraFor(null)}
+        onCapture={image => { applyPhoto(image, cameraFor); setCameraFor(null); }}
+        onChooseFile={() => { chooseFile(cameraFor); setCameraFor(null); }}
+        onNativeCapture={() => { chooseFile(cameraFor, true); setCameraFor(null); }} />}
       {isMockMode() && <div className="mt-2"><SecondaryButton disabled={busy}
         onClick={() => void save(() => normalizePhoto(mockPortrait('customer-' + tab, tab, '연습용 사진', labels[tab])))}>연습용 사진 사용</SecondaryButton></div>}
       {error && <p role="alert" className="text-error mt-2">{error}</p>}
       <div className="flex gap-2 mt-4">
-        <SecondaryButton onClick={() => transitionTo('intent', nav)}>이전</SecondaryButton>
+        <SecondaryButton disabled={busy} onClick={() => transitionTo('intent', nav)}>이전</SecondaryButton>
         <div className="flex-1"><PrimaryButton disabled={!done || busy} onClick={() => transitionTo('style', nav)}>다음 · 스타일 고르기</PrimaryButton></div>
       </div>
     </AppShell>
