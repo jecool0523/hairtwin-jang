@@ -16,7 +16,10 @@ import { mockPortrait } from '../mocks/mockImages';
 export function LoginPage() {
   const nav = useNavigate();
   const login = useAuth((s) => s.login);
-  const [name, setName] = useState('지수 디자이너');
+  const realAuth = import.meta.env.VITE_AUTH_PROVIDER === 'real';
+  const [name, setName] = useState(realAuth ? '' : '지수 디자이너');
+  const [password, setPassword] = useState('');
+  const [register, setRegister] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const start = async () => {
@@ -24,7 +27,7 @@ export function LoginPage() {
     setBusy(true);
     setErr('');
     try {
-      await login(name || undefined);
+      await login(name || undefined, realAuth ? password : undefined, register);
       nav('/dashboard');
     } catch (e) {
       setErr(e instanceof Error ? e.message : '로그인에 실패했어요. 다시 시도해주세요.');
@@ -103,18 +106,26 @@ export function LoginPage() {
         <div className="bg-ink text-white rounded-3xl p-7 sm:p-9 grid sm:grid-cols-[1fr_320px] gap-6 items-center">
           <div>
             <h2 className="text-[24px] font-extrabold">디자이너 로그인</h2>
-            <p className="text-white/60 text-[15px] mt-1">태블릿을 켜고 바로 상담을 시작하세요. 비밀번호는 필요 없어요.</p>
-            <div className="mt-4 flex gap-2">
+            <p className="mt-2 text-[13px] text-white/70">{import.meta.env.VITE_AI_PROVIDER === 'real' ? 'OpenAI로 헤어스타일 이미지를 생성합니다.' : '이미지 생성은 현재 목업 모드로 제공됩니다.'}</p>
+            <p className="text-white/60 text-[15px] mt-1">{realAuth ? '이름과 비밀번호로 상담 기록을 안전하게 관리하세요.' : '태블릿을 켜고 바로 상담을 시작하세요. 비밀번호는 필요 없어요.'}</p>
+            <div className="mt-4 flex gap-2 flex-wrap">
               <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') start(); }}
-                placeholder="지수 디자이너"
+                placeholder="디자이너 이름" aria-label="디자이너 이름" autoComplete="username"
                 className="flex-1 min-h-[52px] rounded-2xl px-4 text-[16px] text-ink bg-white outline-none focus:ring-2 focus:ring-primary" />
-              <button onClick={start} disabled={busy}
+              {realAuth && <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') start(); }} placeholder="비밀번호 (8자 이상)" aria-label="비밀번호"
+                autoComplete={register ? 'new-password' : 'current-password'} minLength={8}
+                className="flex-1 min-h-[52px] rounded-2xl px-4 text-[16px] text-ink bg-white outline-none focus:ring-2 focus:ring-primary" />}
+              <button onClick={start} disabled={busy || (realAuth && (!name.trim() || password.length < 8))}
                 className="min-h-[52px] px-7 rounded-2xl bg-primary hover:bg-primaryDark font-bold text-[16px] transition active:scale-[.98] whitespace-nowrap disabled:opacity-60">
-                {busy ? '접속 중…' : '시작하기'}
+                {busy ? '접속 중…' : register ? '가입하기' : realAuth ? '로그인' : '시작하기'}
               </button>
             </div>
             {err && <p className="text-warning text-[14px] mt-2">{err}</p>}
-            <p className="text-white/40 text-[13px] mt-3">데모 환경 · 입력한 이름으로 인사말이 표시됩니다</p>
+            <p className="text-white/60 text-[13px] mt-3">{realAuth ? '상담 기록은 계정별로 저장됩니다.' : '데모 환경 · 입력한 이름으로 인사말이 표시됩니다'}</p>
+            {realAuth && <button type="button" className="mt-3 text-[14px] underline" onClick={() => { setRegister(!register); setErr(''); }}>
+              {register ? '이미 계정이 있어요 · 로그인' : '처음이신가요? 회원가입'}
+            </button>}
           </div>
           <div className="hidden sm:block">
             <div className="bg-white/10 border border-white/15 rounded-2xl p-5">

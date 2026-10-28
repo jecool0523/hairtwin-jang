@@ -1,15 +1,11 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync as SQLiteDatabase } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import pg, { type PoolClient } from 'pg';
 import { config } from '../config.js';
 
-/**
- * SQLite 연결 + 버전형 마이그레이션 러너.
- * - 파일 DB (기본 ./data/hairtwin.sqlite). :memory: 지원.
- * - _migrations 테이블로 적용 여부 추적, 재실행 시 멱등.
- */
-
 const MIGRATIONS: { version: number; name: string; sql: string }[] = [
+  { version: 3, name: 'persistent_media', sql: 'CREATE TABLE IF NOT EXISTS media (id TEXT PRIMARY KEY, designer_id TEXT NOT NULL REFERENCES designers(id) ON DELETE CASCADE, data_url TEXT NOT NULL); CREATE INDEX IF NOT EXISTS idx_media_designer ON media(designer_id);' },
   {
     version: 1,
     name: 'init',
@@ -105,56 +101,130 @@ const MIGRATIONS: { version: number; name: string; sql: string }[] = [
   },
 ];
 
-let db: DatabaseSync | null = null;
+
+
+// Both drivers expose the same asynchronous statement interface. Local SQLite
+// remains available for development and the regression suite.
+export interface DatabaseSync {
+  prepare(sql: string): {
+    get(...args: any[]): Promise<any>;
+    all(...args: any[]): Promise<any[]>;
+    run(...args: any[]): Promise<{ changes: number }>;
+  };
+  exec(sql: string): Promise<void>;
+}
+
+pg.types.setTypeParser(20, value => Number(value));
+let sqlite: SQLiteDatabase | null = null;
+let pool: pg.Pool | null = null;
+let database: DatabaseSync | null = null;
+let initialization: Promise<void> | null = null;
+
+function postgresDb(client: pg.Pool | PoolClient): DatabaseSync {
+  const query = (sql: string, args: any[] = []) => {
+    let index = 0;
+    const translated = sql.replace(/\?/g, () => '$' + (++index))
+      .replace(/ORDER BY rowid/g, 'ORDER BY sequence_no');
+    return client.query(translated, args);
+  };
+  return {
+    prepare(sql) {
+      return {
+        get: async (...args) => (await query(sql, args)).rows[0],
+        all: async (...args) => (await query(sql, args)).rows,
+        run: async (...args) => ({ changes: (await query(sql, args)).rowCount ?? 0 }),
+      };
+    },
+    exec: async sql => { await query(sql); },
+  };
+}
 
 export function getDb(): DatabaseSync {
-  if (db) return db;
-  if (config.dbPath !== ':memory:') {
-    const dir = path.dirname(config.dbPath);
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  db = new DatabaseSync(config.dbPath);
-  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
-  migrate(db);
-  return db;
-}
-
-/** 트랜잭션 헬퍼: fn이 throw하면 롤백 */
-export function transaction<T>(fn: (db: DatabaseSync) => T): T {
-  const d = getDb();
-  // node:sqlite는 exec 기반 트랜잭션 사용
-  d.exec('BEGIN IMMEDIATE');
-  try {
-    const out = fn(d);
-    d.exec('COMMIT');
-    return out;
-  } catch (e) {
-    try {
-      d.exec('ROLLBACK');
-    } catch {
-      /* ignore */
+  if (database) return database;
+  if (process.env.DATABASE_URL) {
+    pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3,
+      idleTimeoutMillis: 10000, connectionTimeoutMillis: 10000 });
+    database = postgresDb(pool);
+  } else {
+    if (process.env.VERCEL) throw new Error('DATABASE_URL is required on Vercel.');
+    if (config.dbPath !== ':memory:') fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
+    sqlite = new SQLiteDatabase(config.dbPath);
+    sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+    sqlite.exec('CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)');
+    const applied = new Set((sqlite.prepare('SELECT version FROM _migrations').all() as { version: number }[]).map(row => row.version));
+    for (const m of [...MIGRATIONS].sort((a, b) => a.version - b.version)) {
+      if (applied.has(m.version)) continue;
+      sqlite.exec(m.sql);
+      sqlite.prepare('INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)').run(m.version, m.name, new Date().toISOString());
     }
-    throw e;
+    database = {
+      prepare(sql) {
+        return {
+          get: async (...args) => sqlite!.prepare(sql).get(...args),
+          all: async (...args) => sqlite!.prepare(sql).all(...args),
+          run: async (...args) => ({ changes: Number(sqlite!.prepare(sql).run(...args).changes) }),
+        };
+      },
+      exec: async sql => { sqlite!.exec(sql); },
+    };
   }
+  return database;
 }
 
-function migrate(d: DatabaseSync): void {
-  d.exec(`CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)`);
-  const applied = new Set(
-    (d.prepare('SELECT version FROM _migrations').all() as { version: number }[]).map((r) => r.version)
-  );
-  for (const m of MIGRATIONS) {
-    if (applied.has(m.version)) continue;
-    d.exec(m.sql);
-    d.prepare('INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)').run(
-      m.version,
-      m.name,
-      new Date().toISOString()
-    );
-  }
+export async function initializeDatabase(): Promise<void> {
+  getDb();
+  if (!pool) return;
+  if (!initialization) initialization = (async () => {
+    const client = await pool!.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(781426001)');
+      await client.query('CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)');
+      const applied = new Set((await client.query('SELECT version FROM _migrations')).rows.map(row => row.version));
+      for (const migration of [...MIGRATIONS].sort((a, b) => a.version - b.version)) {
+        if (applied.has(migration.version)) continue;
+        const sql = migration.sql.replace(/PRAGMA foreign_keys = ON;/g, '')
+          .replace(/strftime\('%Y-%m-%dT%H:%M:%fZ','now'\)/g, 'CURRENT_TIMESTAMP::text')
+          .replace('CREATE TABLE ai_versions (', 'CREATE TABLE ai_versions (sequence_no BIGSERIAL UNIQUE,');
+        await client.query(sql);
+        await client.query('INSERT INTO _migrations (version, name, applied_at) VALUES ($1, $2, $3)', [migration.version, migration.name, new Date().toISOString()]);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  })().catch(error => { initialization = null; throw error; });
+  await initialization;
 }
 
-export function closeDb(): void {
-  db?.close();
-  db = null;
+// A dedicated connection keeps all statements in the same PostgreSQL transaction.
+// SQLite transactions are serialized because async continuations may interleave.
+let sqliteQueue: Promise<unknown> = Promise.resolve();
+export async function transaction<T>(fn: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
+  const db = getDb();
+  if (pool) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await fn(postgresDb(client));
+      await client.query('COMMIT');
+      return result;
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
+  }
+  const task = sqliteQueue.then(async () => {
+    await db.exec('BEGIN IMMEDIATE');
+    try { const result = await fn(db); await db.exec('COMMIT'); return result; }
+    catch (error) { await db.exec('ROLLBACK'); throw error; }
+  });
+  sqliteQueue = task.catch(() => {});
+  return task;
+}
+
+export async function closeDb(): Promise<void> {
+  await sqliteQueue;
+  sqlite?.close();
+  await pool?.end();
+  sqlite = null; pool = null; database = null; initialization = null;
 }

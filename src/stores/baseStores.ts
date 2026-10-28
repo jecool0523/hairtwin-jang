@@ -11,7 +11,7 @@ interface AuthState {
   loggedIn: boolean;
   /** 서버 모드 여부 (false = 백엔드 없이 로컬 동작) */
   serverMode: boolean;
-  login: (name?: string) => Promise<void>;
+  login: (name?: string, password?: string, register?: boolean) => Promise<void>;
   logout: () => void;
 }
 export const useAuth = create<AuthState>()(
@@ -20,10 +20,10 @@ export const useAuth = create<AuthState>()(
       designer: '지수 디자이너',
       loggedIn: false,
       serverMode: false,
-      login: async (name) => {
+      login: async (name, password, register) => {
         const display = name?.trim() || '지수 디자이너';
         try {
-          const { token, designer } = await api.login(display);
+          const { token, designer } = await (register ? api.register(display, password ?? '') : api.login(display, password));
           if (get().designer !== designer.name) {
             useConsult.getState().reset();
             useDash.setState({ customers: [], records: [], status: 'idle', error: null });
@@ -32,7 +32,7 @@ export const useAuth = create<AuthState>()(
           setToken(token);
           set({ loggedIn: true, designer: designer.name, serverMode: true });
         } catch (e) {
-          if (isOnlineError(e)) {
+          if (isOnlineError(e) && import.meta.env.VITE_AUTH_PROVIDER !== 'real') {
             // 백엔드 없이도 체험 가능 (기존 로컬 동작 유지)
             clearToken();
             set({ loggedIn: true, designer: display, serverMode: false });
