@@ -1,5 +1,36 @@
 # Hair Twin
 
+## Vercel 운영 배포
+
+- 서비스: https://hairtwin-jang.vercel.app
+- Vercel 프로젝트: `je-cools-projects/hairtwin-jang`
+- 데이터베이스: Vercel Marketplace의 Neon `hairtwin-jang-db` (Free, Singapore)
+- Node.js 22, Vite 프론트와 `api/index.mjs`의 Express API를 함께 배포합니다.
+- 운영에서는 비밀번호로 회원가입·로그인합니다. SQLite와 이름만 사용하는 로그인은 로컬 개발용으로 유지합니다.
+- 사진은 계정별로 중복을 제거해 DB에 저장하고, 화면에는 만료되는 서명 URL을 전달합니다. 여러 사진을 개별 업로드하므로 Vercel의 4.5MB 요청·응답 제한 안에서 상담을 처리합니다.
+- `AI_PROVIDER=mock`입니다. 실제 생성 활성화에는 서버 환경변수 `OPENAI_API_KEY`를 등록하고 `AI_PROVIDER=real`로 바꾼 뒤 재배포해야 합니다.
+
+Vercel의 필수 환경변수:
+
+| 변수 | 값 / 역할 |
+| --- | --- |
+| `DATABASE_URL` | Neon 통합이 자동 등록하는 PostgreSQL 연결 문자열 |
+| `JWT_SECRET` | 충분히 긴 무작위 서버 전용 비밀키 |
+| `AUTH_PROVIDER` / `VITE_AUTH_PROVIDER` | `real` |
+| `SEED_DEMO` | `false` |
+| `AI_PROVIDER` | `mock`; 실제 AI 키를 연결한 뒤 `real` |
+| `VITE_MOCK_AI` | `false` |
+| `CORS_ORIGIN` | `https://hairtwin-jang.vercel.app` |
+
+`vercel.json`이 프론트·서버 설치/빌드와 API·SPA 경로를 설정합니다. GitHub의 변경 사항을 배포하려면 이 설정을 포함한 브랜치를 사용해야 합니다. 미리보기 환경에도 `JWT_SECRET`, 인증 모드 등 위 변수를 별도로 등록하세요.
+
+PostgreSQL 통합 검증은 프로젝트 루트에서 다음 명령으로 실행합니다. 검증 계정·상담은 테스트 종료 시 정리합니다.
+
+```powershell
+$env:RUN_POSTGRES_TESTS='1'
+node --env-file=.env.local --import ./server/node_modules/tsx/dist/loader.mjs --test server/test/postgres.test.ts
+```
+
 미용사와 고객이 헤어스타일 후보를 함께 보고, 원하는 부분을 조정한 뒤 상담 결과를 기록하는 태블릿용 웹 앱입니다. 고객의 앞·옆·뒤 사진과 상담 조건을 바탕으로 후보를 비교하고, 이미지 버전별 변경 이력을 보관합니다.
 
 React 프론트엔드와 Express 백엔드로 구성되어 있으며 데이터는 SQLite에 저장합니다. **기본 개발 모드는 목업 로그인과 목업 AI입니다. API 키 없이 상담·생성·편집·저장 흐름을 확인할 수 있습니다.** 실제 AI 호출 코드는 구현되어 있지만, 키 연결과 실제 모델의 이미지 품질 검증은 아직 진행하지 않았습니다.

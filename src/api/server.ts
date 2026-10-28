@@ -47,12 +47,27 @@ export class ApiError extends Error {
   }
 }
 
+async function prepareImages(value: any): Promise<any> {
+  if (typeof value === 'string') {
+    if (value.startsWith('data:image/png;base64,')) {
+      const uploaded = await request<{reference: string}>('/media', {method: 'POST', body: JSON.stringify({image: value})});
+      return uploaded.reference;
+    }
+    const match = value.match(/(?:^|\/)api\/media\/([a-f0-9]{64})(?:\?|$)/);
+    return match ? 'media:' + match[1] : value;
+  }
+  if (Array.isArray(value)) return Promise.all(value.map(prepareImages));
+  if (value && typeof value === 'object') return Object.fromEntries(await Promise.all(Object.entries(value).map(async ([k,v]) => [k, await prepareImages(v)])));
+  return value;
+}
+
 async function request<T>(path: string, init: RequestInit = {}, auth = true): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (auth) {
     const t = getToken();
     if (t) headers.Authorization = `Bearer ${t}`;
   }
+  if (path !== '/media' && typeof init.body === 'string') init = {...init, body: JSON.stringify(await prepareImages(JSON.parse(init.body)))};
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, { ...init, headers: { ...headers, ...(init.headers as Record<string, string>) } });
@@ -92,8 +107,10 @@ export interface Designer {
 }
 
 export const api = {
-  login: (name: string) =>
-    request<{ token: string; designer: Designer }>('/auth/login', { method: 'POST', body: JSON.stringify({ name }) }, false),
+  login: (name: string, password?: string) =>
+    request<{ token: string; designer: Designer }>('/auth/login', { method: 'POST', body: JSON.stringify({ name, password }) }, false),
+  register: (name: string, password: string) =>
+    request<{ token: string; designer: Designer }>('/auth/register', { method: 'POST', body: JSON.stringify({ name, password }) }, false),
   me: () => request<{ designer: Designer }>('/auth/me'),
 
   customers: {

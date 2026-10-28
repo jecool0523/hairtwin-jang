@@ -34,7 +34,7 @@ before(async()=>{
 });
 after(async()=>{
   await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));
-  const {closeDb}=await import('../src/db/database.js');closeDb();
+  const {closeDb}=await import('../src/db/database.js');await closeDb();
   rmSync(directory,{recursive:true,force:true});
 });
 test('photos are required, arbitrary URLs and invalid input are rejected',async()=>{
@@ -80,7 +80,7 @@ test('record stores the selected returned images and retains session history thr
   assert.equal(record.data.selectedVersionId,edited.version.id);
   assert.equal((await request('/records','POST',body)).data.id,record.data.id);
   assert.equal((await request('/records','POST',body,otherToken)).status,404);
-  const {closeDb}=await import('../src/db/database.js');closeDb();
+  const {closeDb}=await import('../src/db/database.js');await closeDb();
   const restored=await request('/ai/sessions/'+generated.sessionId);
   assert.equal(restored.data.versions.length,5);
   assert.deepEqual(restored.data.versions.find((v:any)=>v.id===edited.version.id).views,edited.version.views);
